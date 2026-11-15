@@ -2980,7 +2980,8 @@ bool clientOnFrame(SDL_Window* window)
             config.FontDataOwnedByAtlas = false;
             config.FontNo = static_cast<ImU32>(faceIndex);
             config.GlyphExcludeRanges = gIconGlyphRanges;
-            if (ImFont* font = io.Fonts->AddFontFromMemoryTTF(const_cast<char*>(fontData), fontSize, kUiFontSize, &config))
+            if (ImFont* font =
+                    io.Fonts->AddFontFromMemoryTTF(const_cast<char*>(fontData), fontSize, kUiFontSize, &config))
             {
                 ImFontConfig iconConfig{};
                 iconConfig.MergeMode = true;
