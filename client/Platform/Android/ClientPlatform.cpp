@@ -451,6 +451,11 @@ float clientPlatformGetDisplayScale()
     return gDisplayScale.load(std::memory_order_relaxed);
 }
 
+bool clientPlatformPrefersDarkMode()
+{
+    return true; // The client's Material You theme is dark-only.
+}
+
 bool clientPlatformInitGraphics(SDL_Renderer* renderer)
 {
     if (renderer)

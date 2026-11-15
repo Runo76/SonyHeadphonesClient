@@ -24,6 +24,13 @@ extern bool clientOnFrame(SDL_Window* window);
 extern void clientDestroy();
 extern void clientSetPauseMediaOnRemove(bool enabled);
 extern float clientPlatformGetDisplayScale();
+/**
+ * @brief Whether the platform's system appearance prefers a dark color scheme.
+ *
+ * Only implemented meaningfully on iOS (via @c UITraitCollection); every other
+ * platform reports @c true because the client's Material You theme is dark-only.
+ */
+extern bool clientPlatformPrefersDarkMode();
 extern const char* clientPlatformGetProcessorArchitecture();
 /**
  * Platform specific SDL_Renderer setup

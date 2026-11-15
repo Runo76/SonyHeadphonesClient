@@ -389,6 +389,9 @@ namespace i18n
         DebuggerReplayNoFiles,
         DebuggerMapKey,
         DebuggerMapValue,
+        AudioQuality,
+        StableConnection,
+        SoundPressure,
         Count,
     };
 

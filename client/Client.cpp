@@ -36,6 +36,12 @@ static char* gFontFallbackData = nullptr;
 static int gFontFallbackSize{};
 static mdr::String gFontFallbackPath;
 static constexpr ImWchar gIconGlyphRanges[] = {0xf000, 0xf2ff, 0};
+#ifdef SDL_PLATFORM_IOS
+// Slightly larger UI text and touch targets on iOS.
+static constexpr float kUiFontSize = 17.0f;
+#else
+static constexpr float kUiFontSize = 15.0f;
+#endif
 
 static void DestroyFontFallback()
 {
@@ -416,6 +422,19 @@ const char* FormatAutoPowerOff(uint32_t minutes)
         return Tr(i18n::TextId::PowerOff3Hours);
     case 0:
         return Tr(i18n::TextId::PowerOffNever);
+    default:
+        return Tr(i18n::TextId::Unknown);
+    }
+}
+
+const char* FormatAudioPriority(MDRAudioPriority priority)
+{
+    switch (priority)
+    {
+    case MDR_AUDIO_PRIORITY_QUALITY:
+        return Tr(i18n::TextId::AudioQuality);
+    case MDR_AUDIO_PRIORITY_STABILITY:
+        return Tr(i18n::TextId::StableConnection);
     default:
         return Tr(i18n::TextId::Unknown);
     }
@@ -1230,6 +1249,11 @@ void DrawDeviceDiscovery()
             styles.PushFont(IM_FONTSIZE_CAPTION);
             styles.PushVar(ImGuiStyleVar_FramePadding, ImVec2{});
             styles.PushVar(ImGuiStyleVar_FrameRounding, 0.0f);
+#ifdef __APPLE__
+            // The Apple backends are Classic (iAP2) only; BLE is not offered.
+            usingBLE = false;
+            ImModalButton(TrLable(i18n::TextId::Classic, PSI_BLUETOOTH));
+#else
             {
                 ImStylesRAII styles;
                 if (usingBLE)
@@ -1244,6 +1268,7 @@ void DrawDeviceDiscovery()
                 if (ImModalButton(TrLable(i18n::TextId::Ble, PSI_BLUETOOTH_ALT), 1, 2))
                     usingBLE = true, needSwitchClientPlatform = true;
             }
+#endif
         }
         ImGui::BeginDisabled(usingBLE);
         {
@@ -2392,6 +2417,46 @@ void DrawDeviceControlsSystem()
         }
         ImGui::TreePop();
     }
+    /* Connection Mode */
+    if (FeatureAvailable(MDR_FEATURE_CONNECTION_MODE) &&
+        ImHeadingTreeNode(TrLable(i18n::TextId::ConnectionMode), ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        MDRConnectionMode connectionMode{};
+        if (mdrHeadphonesGetConnectionMode(gDevice, MDR_PROPERTY_DESIRED, &connectionMode) == MDR_RESULT_OK)
+        {
+            constexpr MDRAudioPriority kPriorities[] = {MDR_AUDIO_PRIORITY_QUALITY, MDR_AUDIO_PRIORITY_STABILITY};
+            for (const MDRAudioPriority priority : kPriorities)
+            {
+                const bool selected = connectionMode.audio_priority == priority;
+                const mdr::String label = mdr::Format("{}###ConnectionMode{}", FormatAudioPriority(priority), priority);
+                if (ImGui::RadioButton(label.c_str(), selected) && !selected)
+                {
+                    connectionMode.audio_priority = priority;
+                    mdrHeadphonesSetConnectionMode(gDevice, &connectionMode);
+                }
+            }
+        }
+        ImGui::TreePop();
+    }
+    /* Safe Listening */
+    if (FeatureAvailable(MDR_FEATURE_SAFE_LISTENING) &&
+        ImHeadingTreeNode(TrLable(i18n::TextId::SafeListening), ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        MDRSafeListening safeListening{};
+        if (mdrHeadphonesGetSafeListening(gDevice, MDR_PROPERTY_DESIRED, &safeListening) == MDR_RESULT_OK)
+        {
+            // sound_pressure is read-only (SetSafeListening rejects a changed value), so it is only displayed.
+            ImGui::TextUnformatted(
+                mdr::Format(fmt::runtime(Tr(i18n::TextId::SoundPressure)), safeListening.sound_pressure).c_str());
+            bool enabled = safeListening.preview != MDR_FALSE;
+            if (ImGui::Checkbox(TrLable(i18n::TextId::Enabled), &enabled))
+            {
+                safeListening.preview = enabled ? MDR_TRUE : MDR_FALSE;
+                mdrHeadphonesSetSafeListening(gDevice, &safeListening);
+            }
+        }
+        ImGui::TreePop();
+    }
 }
 void DrawDeviceControlsAbout()
 {
@@ -2563,6 +2628,11 @@ void UpdateDeviceControls()
     case MDR_EVENT_ALERT:
         gAlertMessage = GetText(MDR_TEXT_LAST_ALERT);
         gAlertPending = true;
+        break;
+    case MDR_EVENT_CONNECTION_MODE_CHANGED:
+    case MDR_EVENT_SAFE_LISTENING_CHANGED:
+        // These values are read live from the device each frame; the redraw
+        // scheduled by the `event != MDR_EVENT_NONE` check above is sufficient.
         break;
     }
 
@@ -2807,7 +2877,7 @@ static bool PrepareDefaultFontFallback()
         config.MergeMode = true;
         config.DstFont = gEmbeddedFont;
         config.GlyphExcludeRanges = gIconGlyphRanges;
-        if (ImGui::GetIO().Fonts->AddFontFromMemoryTTF(const_cast<char*>(fontData), fontSize, 15.0f, &config))
+        if (ImGui::GetIO().Fonts->AddFontFromMemoryTTF(const_cast<char*>(fontData), fontSize, kUiFontSize, &config))
         {
             MDR_LOG("Loaded English fallback font: locale {}, {} bytes, face {}", locale, fontSize, faceIndex);
             gDefaultFontFallbackPrepared = true;
@@ -2860,12 +2930,17 @@ bool clientInit(float displayScale, const char* fontPath)
     style.FrameRounding = 8.0f;
     style.CircleTessellationMaxError = 0.01f;
     style.FramePadding = ImVec2(8.0f, 8.0f);
+#ifdef SDL_PLATFORM_IOS
+    // Larger touch targets and rounded corners for iOS.
+    style.FramePadding = ImVec2(14.0f, 14.0f);
+    style.FrameRounding = 12.0f;
+#endif
 
     io.Fonts->Clear();
 #ifdef MDR_CLIENT_DEBUGGER
     ImFont* monospaceFont = io.Fonts->AddFontDefault();
 #endif
-    gEmbeddedFont = io.Fonts->AddFontFromMemoryCompressedBase85TTF(kEmbedFontPlexSansIcon, 15.0f);
+    gEmbeddedFont = io.Fonts->AddFontFromMemoryCompressedBase85TTF(kEmbedFontPlexSansIcon, kUiFontSize);
     io.FontDefault = gEmbeddedFont;
 #ifdef MDR_CLIENT_DEBUGGER
     clientDebuggerSetMonospaceFont(monospaceFont);
@@ -2905,12 +2980,12 @@ bool clientOnFrame(SDL_Window* window)
             config.FontDataOwnedByAtlas = false;
             config.FontNo = static_cast<ImU32>(faceIndex);
             config.GlyphExcludeRanges = gIconGlyphRanges;
-            if (ImFont* font = io.Fonts->AddFontFromMemoryTTF(const_cast<char*>(fontData), fontSize, 15.0f, &config))
+            if (ImFont* font = io.Fonts->AddFontFromMemoryTTF(const_cast<char*>(fontData), fontSize, kUiFontSize, &config))
             {
                 ImFontConfig iconConfig{};
                 iconConfig.MergeMode = true;
                 iconConfig.DstFont = font;
-                if (io.Fonts->AddFontFromMemoryCompressedBase85TTF(kEmbedFontPlexSansIcon, 15.0f, &iconConfig,
+                if (io.Fonts->AddFontFromMemoryCompressedBase85TTF(kEmbedFontPlexSansIcon, kUiFontSize, &iconConfig,
                                                                    gIconGlyphRanges))
                 {
                     io.FontDefault = font;

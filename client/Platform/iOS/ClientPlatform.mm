@@ -325,6 +325,17 @@ int clientPlatformSaveBlob(const char* filename, const unsigned char* data, size
     return MDR_RESULT_OK;
 }
 
+bool clientPlatformPrefersDarkMode()
+{
+    @autoreleasepool
+    {
+        if (@available(iOS 13.0, *))
+            return UIScreen.mainScreen.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark;
+        // Pre-iOS 13 has no system appearance; the client's theme is dark-only.
+        return true;
+    }
+}
+
 extern "C" void clientIOSDestroy()
 {
     if (gEventWakeupSource)

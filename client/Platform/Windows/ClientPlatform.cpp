@@ -23,6 +23,11 @@ float clientPlatformGetDisplayScale()
     return scale > 0.0f ? scale : 1.0f;
 }
 
+bool clientPlatformPrefersDarkMode()
+{
+    return true; // The client's Material You theme is dark-only.
+}
+
 bool clientPlatformInitGraphics(SDL_Renderer*)
 {
     return true;
