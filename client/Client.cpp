@@ -38,9 +38,9 @@ static mdr::String gFontFallbackPath;
 static constexpr ImWchar gIconGlyphRanges[] = {0xf000, 0xf2ff, 0};
 #ifdef SDL_PLATFORM_IOS
 // Slightly larger UI text and touch targets on iOS.
-static constexpr float kUiFontSize = 17.0f;
+static constexpr float kUiFontSize = 18.0f;
 #else
-static constexpr float kUiFontSize = 15.0f;
+static constexpr float kUiFontSize = 16.0f;
 #endif
 
 static void DestroyFontFallback()
@@ -705,10 +705,10 @@ void CloseDevice()
 }
 
 #pragma region ImGui Extra
-#define IM_FONTSIZE_TITLE 22
-#define IM_FONTSIZE_HEADING 18
-#define IM_FONTSIZE_SUBHEADING 16
-#define IM_FONTSIZE_BODY 15
+#define IM_FONTSIZE_TITLE 27
+#define IM_FONTSIZE_HEADING 20
+#define IM_FONTSIZE_SUBHEADING 17
+#define IM_FONTSIZE_BODY 16
 #define IM_FONTSIZE_CAPTION 13
 
 struct ImStylesRAII
@@ -749,6 +749,9 @@ void ImHeading(const char* text, float fontSize = IM_FONTSIZE_HEADING)
 {
     ImStylesRAII scope;
     scope.PushFont(fontSize);
+    // Accent-tinted section headers: unmistakable section landmarks.
+    scope.PushCol(ImGuiCol_Text, MaterialYouTheme::ArgbToImVec4(MaterialYouTheme::AccentColors::primary));
+    scope.PushCol(ImGuiCol_Separator, MaterialYouTheme::ArgbToImVec4(MaterialYouTheme::AccentColors::primary, 0.45f));
     ImGui::SeparatorText(text);
 }
 
@@ -756,28 +759,35 @@ bool ImHeadingTreeNode(const char* label, ImGuiTreeNodeFlags flags = ImGuiTreeNo
 {
     ImStylesRAII scope;
     // Consistent breathing room before each section, and a clean, borderless
-    // section header (the tinted band is reserved for combo/list selection).
+    // section header. The header label is drawn in the accent so sections pop.
     ImGui::Dummy(ImVec2(0.0f, ImGui::GetStyle().ItemSpacing.y));
     scope.PushCol(ImGuiCol_Header, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+    scope.PushCol(ImGuiCol_HeaderHovered, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+    scope.PushCol(ImGuiCol_HeaderActive, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+    scope.PushCol(ImGuiCol_Text, MaterialYouTheme::ArgbToImVec4(MaterialYouTheme::AccentColors::primary));
     scope.PushFont(IM_FONTSIZE_HEADING);
     return ImGui::TreeNodeEx(label, flags);
 }
 
-// A rounded, subtly elevated surface used for grouped content ("cards").
+// A rounded, bordered, elevated surface used for grouped content ("cards").
 bool ImBeginCard(const char* id)
 {
     ImGui::PushStyleColor(ImGuiCol_ChildBg,
                           MaterialYouTheme::ArgbToImVec4(MaterialYouTheme::FixedSurfaceColors::surfaceContainerLow));
-    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 14.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16.0f, 14.0f));
-    return ImGui::BeginChild(id, ImVec2(0, 0), ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysUseWindowPadding);
+    ImGui::PushStyleColor(ImGuiCol_Border,
+                          MaterialYouTheme::ArgbToImVec4(MaterialYouTheme::FixedSurfaceColors::outlineVariant));
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 16.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18.0f, 16.0f));
+    return ImGui::BeginChild(id, ImVec2(0, 0),
+                             ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysUseWindowPadding |
+                                 ImGuiChildFlags_Borders);
 }
 
 void ImEndCard()
 {
     ImGui::EndChild();
     ImGui::PopStyleVar(2);
-    ImGui::PopStyleColor();
+    ImGui::PopStyleColor(2);
 }
 
 constexpr ImGuiWindowFlags kImWindowFlagsTopMost =
@@ -978,6 +988,9 @@ bool ImModalButton(const char* label, int lineIndex = 0, int lineTotal = 1)
     float width = ImGui::GetContentRegionAvail().x / lineTotal;
     if (lineIndex)
         ImGui::SameLine();
+    // Filled accent buttons need dark on-accent text for contrast.
+    ImStylesRAII scope;
+    scope.PushCol(ImGuiCol_Text, MaterialYouTheme::ArgbToImVec4(MaterialYouTheme::AccentColors::onPrimary));
     return ImGui::Button(label, lineTotal > 1 ? ImVec2{width - padding, 0} : ImVec2{width, 0});
 }
 
@@ -2111,8 +2124,7 @@ void DrawDeviceControlsDevices()
     {
         ImTextCentered(Tr(i18n::TextId::Pairing), IM_FONTSIZE_HEADING);
         ImSpinner(1000.0f, ImGui::GetContentRegionAvail().x - ImGui::GetStyle().WindowPadding.x * 2.0f,
-                  MaterialYouTheme::ArgbToImU32(MaterialYouTheme::ThemeForModelColor(GetModelColor()).primary), 2.0f,
-                  true, false);
+                  MaterialYouTheme::ArgbToImU32(MaterialYouTheme::AccentColors::primary), 2.0f, true, false);
         if (ImModalButton(TrLable(i18n::TextId::Stop)))
         {
             pairing.enabled = MDR_FALSE;
@@ -2951,24 +2963,25 @@ bool clientInit(float displayScale, const char* fontPath)
     style.ScaleAllSizes(displayScale);
     style.FontScaleDpi = displayScale;
 
-    // Premium-neutral restyle: consistent rounding, an 8/4-based spacing scale,
-    // generous padding and a single accent (see MaterialYouTheme::Apply).
-    style.WindowPadding = ImVec2(20.0f, 20.0f);
-    style.WindowRounding = 16.0f;
-    style.ChildRounding = 12.0f;
-    style.PopupRounding = 14.0f;
-    style.FrameRounding = 10.0f;
-    style.GrabRounding = 10.0f;
-    style.TabRounding = 10.0f;
+    // Premium restyle: generous rounding and spacing, card-like surfaces and a
+    // single vivid accent (see MaterialYouTheme::Apply).
+    style.WindowPadding = ImVec2(24.0f, 22.0f);
+    style.WindowRounding = 18.0f;
+    style.ChildRounding = 14.0f;
+    style.PopupRounding = 16.0f;
+    style.FrameRounding = 12.0f;
+    style.GrabRounding = 12.0f;
+    style.TabRounding = 12.0f;
     style.ScrollbarRounding = 8.0f;
-    style.ItemSpacing = ImVec2(12.0f, 8.0f);
+    style.ItemSpacing = ImVec2(14.0f, 10.0f);
     style.ItemInnerSpacing = ImVec2(8.0f, 6.0f);
-    style.CellPadding = ImVec2(10.0f, 6.0f);
-    style.IndentSpacing = 22.0f;
+    style.CellPadding = ImVec2(12.0f, 8.0f);
+    style.IndentSpacing = 24.0f;
     style.ScrollbarSize = 12.0f;
-    style.FramePadding = ImVec2(12.0f, 8.0f);
+    style.FramePadding = ImVec2(13.0f, 9.0f);
     style.SeparatorTextBorderSize = 0.0f;
-    style.SeparatorTextPadding = ImVec2(12.0f, 6.0f);
+    style.SeparatorTextPadding = ImVec2(14.0f, 8.0f);
+    style.TabBarBorderSize = 1.0f;
     style.CircleTessellationMaxError = 0.01f;
 #ifdef SDL_PLATFORM_IOS
     // Larger touch targets and rounded corners for iOS.
