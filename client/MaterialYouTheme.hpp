@@ -71,7 +71,8 @@ namespace MaterialYouTheme
         auto& style = ImGui::GetStyle();
         ImVec4* c = style.Colors;
 
-        // Fixed surface colors (Sony standard)
+        // Neutral, near-monochrome surfaces (Sony standard). The accent is reserved
+        // for interactive states below — no tinted fills, for a premium/restrained look.
         c[ImGuiCol_WindowBg] = ArgbToImVec4(FixedSurfaceColors::surface);
         c[ImGuiCol_ChildBg] = ArgbToImVec4(FixedSurfaceColors::surface, 0.0f);
         c[ImGuiCol_PopupBg] = ArgbToImVec4(FixedSurfaceColors::surfaceContainerLow);
@@ -85,64 +86,65 @@ namespace MaterialYouTheme
         c[ImGuiCol_TitleBgActive] = ArgbToImVec4(FixedSurfaceColors::inverseSurface);
         c[ImGuiCol_TitleBgCollapsed] = ArgbToImVec4(FixedSurfaceColors::surface);
 
-        // Text (fixed)
+        // Text
         c[ImGuiCol_Text] = ArgbToImVec4(FixedSurfaceColors::onSurface);
         c[ImGuiCol_TextDisabled] = ArgbToImVec4(FixedSurfaceColors::onSurfaceVariant);
 
-        // Borders (fixed)
+        // Borders and separators (hairlines only, no tint)
         c[ImGuiCol_Border] = ImVec4(0, 0, 0, 0);
         c[ImGuiCol_BorderShadow] = ImVec4(0, 0, 0, 0);
-        c[ImGuiCol_Separator] = ArgbToImVec4(FixedSurfaceColors::outline, 0.10f);
-        c[ImGuiCol_SeparatorHovered] = ArgbToImVec4(theme.primary, 0.78f);
-        c[ImGuiCol_SeparatorActive] = ArgbToImVec4(theme.primary);
+        c[ImGuiCol_Separator] = ArgbToImVec4(FixedSurfaceColors::outline, 0.08f);
+        c[ImGuiCol_SeparatorHovered] = ArgbToImVec4(FixedSurfaceColors::outline, 0.24f);
+        c[ImGuiCol_SeparatorActive] = ArgbToImVec4(theme.primary, 0.80f);
         c[ImGuiCol_TableHeaderBg] = ArgbToImVec4(FixedSurfaceColors::surfaceContainerHighest);
         c[ImGuiCol_TableBorderStrong] = ArgbToImVec4(FixedSurfaceColors::outline);
         c[ImGuiCol_TableBorderLight] = ArgbToImVec4(FixedSurfaceColors::outlineVariant);
 
-        // Frame backgrounds: primary tint with increasing opacity
-        c[ImGuiCol_FrameBg] = ArgbToImVec4(theme.primary, 0.20f);
-        c[ImGuiCol_FrameBgHovered] = ArgbToImVec4(theme.primary, 0.40f);
-        c[ImGuiCol_FrameBgActive] = ArgbToImVec4(theme.primary, 0.67f);
+        // Input frames: neutral surfaces, no accent tint.
+        c[ImGuiCol_FrameBg] = ArgbToImVec4(FixedSurfaceColors::surfaceContainerHigh);
+        c[ImGuiCol_FrameBgHovered] = ArgbToImVec4(FixedSurfaceColors::surfaceContainerHighest);
+        c[ImGuiCol_FrameBgActive] = ArgbToImVec4(FixedSurfaceColors::surfaceContainerHighest);
 
         // Scrollbar
         c[ImGuiCol_ScrollbarGrab] = ArgbToImVec4(FixedSurfaceColors::outline);
         c[ImGuiCol_ScrollbarGrabHovered] = ArgbToImVec4(FixedSurfaceColors::onSurfaceVariant);
         c[ImGuiCol_ScrollbarGrabActive] = ArgbToImVec4(theme.primary);
 
-        // Dynamic accent colors
+        // The single accent: selection, sliders, focus and links.
         c[ImGuiCol_CheckMark] = ArgbToImVec4(theme.primary);
         c[ImGuiCol_SliderGrab] = ArgbToImVec4(theme.primary, 0.80f);
         c[ImGuiCol_SliderGrabActive] = ArgbToImVec4(theme.primary);
 
-        // Buttons: primary tint, brighter on hover/active
-        c[ImGuiCol_Button] = ArgbToImVec4(theme.primary, 0.25f);
-        c[ImGuiCol_ButtonHovered] = ArgbToImVec4(theme.primary, 0.50f);
-        c[ImGuiCol_ButtonActive] = ArgbToImVec4(theme.primary, 0.75f);
+        // Buttons: neutral surface, subtle accent only on press.
+        c[ImGuiCol_Button] = ArgbToImVec4(FixedSurfaceColors::surfaceContainerHigh);
+        c[ImGuiCol_ButtonHovered] = ArgbToImVec4(FixedSurfaceColors::surfaceContainerHighest);
+        c[ImGuiCol_ButtonActive] = ArgbToImVec4(theme.primary, 0.28f);
 
-        // Headers: primary tint with increasing opacity
-        c[ImGuiCol_Header] = ArgbToImVec4(theme.primary, 0.22f);
-        c[ImGuiCol_HeaderHovered] = ArgbToImVec4(theme.primary, 0.50f);
-        c[ImGuiCol_HeaderActive] = ArgbToImVec4(theme.primary, 0.75f);
+        // Headers (combo/list selection): neutral, elevated on hover. Section tree
+        // headers override this to transparent at the call site.
+        c[ImGuiCol_Header] = ArgbToImVec4(FixedSurfaceColors::surfaceContainerLow);
+        c[ImGuiCol_HeaderHovered] = ArgbToImVec4(FixedSurfaceColors::surfaceContainerHigh);
+        c[ImGuiCol_HeaderActive] = ArgbToImVec4(FixedSurfaceColors::surfaceContainerHighest);
 
-        // Tabs
+        // Tabs: neutral surface, accent overline marks the selection.
         c[ImGuiCol_Tab] = ArgbToImVec4(FixedSurfaceColors::surfaceContainerLow);
-        c[ImGuiCol_TabSelected] = ArgbToImVec4(theme.primaryContainer);
+        c[ImGuiCol_TabSelected] = ArgbToImVec4(FixedSurfaceColors::surfaceContainerHigh);
         c[ImGuiCol_TabSelectedOverline] = ArgbToImVec4(theme.primary);
-        c[ImGuiCol_TabHovered] = ArgbToImVec4(theme.primary);
+        c[ImGuiCol_TabHovered] = ArgbToImVec4(FixedSurfaceColors::surfaceContainerHighest);
         c[ImGuiCol_TabDimmed] = ArgbToImVec4(FixedSurfaceColors::surface);
         c[ImGuiCol_TabDimmedSelected] = ArgbToImVec4(FixedSurfaceColors::surfaceContainerHigh);
         c[ImGuiCol_TabDimmedSelectedOverline] = ArgbToImVec4(FixedSurfaceColors::outline);
 
         // Misc
         c[ImGuiCol_TextLink] = ArgbToImVec4(theme.primary);
-        c[ImGuiCol_TextSelectedBg] = ArgbToImVec4(theme.primaryContainer, 0.4f);
+        c[ImGuiCol_TextSelectedBg] = ArgbToImVec4(theme.primary, 0.35f);
         c[ImGuiCol_NavCursor] = ArgbToImVec4(theme.primary);
         c[ImGuiCol_DragDropTarget] = ArgbToImVec4(theme.primary);
 
-        // Resize grip: primary tint
-        c[ImGuiCol_ResizeGrip] = ArgbToImVec4(theme.primary, 0.20f);
-        c[ImGuiCol_ResizeGripHovered] = ArgbToImVec4(theme.primary, 0.67f);
-        c[ImGuiCol_ResizeGripActive] = ArgbToImVec4(theme.primary, 0.95f);
+        // Resize grip: neutral, accent when active.
+        c[ImGuiCol_ResizeGrip] = ArgbToImVec4(FixedSurfaceColors::outline, 0.5f);
+        c[ImGuiCol_ResizeGripHovered] = ArgbToImVec4(FixedSurfaceColors::onSurfaceVariant);
+        c[ImGuiCol_ResizeGripActive] = ArgbToImVec4(theme.primary);
 
         // Plot
         c[ImGuiCol_PlotLines] = ArgbToImVec4(theme.primary);

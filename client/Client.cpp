@@ -705,11 +705,11 @@ void CloseDevice()
 }
 
 #pragma region ImGui Extra
-#define IM_FONTSIZE_TITLE 20
+#define IM_FONTSIZE_TITLE 22
 #define IM_FONTSIZE_HEADING 18
 #define IM_FONTSIZE_SUBHEADING 16
 #define IM_FONTSIZE_BODY 15
-#define IM_FONTSIZE_CAPTION 14
+#define IM_FONTSIZE_CAPTION 13
 
 struct ImStylesRAII
 {
@@ -755,8 +755,29 @@ void ImHeading(const char* text, float fontSize = IM_FONTSIZE_HEADING)
 bool ImHeadingTreeNode(const char* label, ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_DefaultOpen)
 {
     ImStylesRAII scope;
+    // Consistent breathing room before each section, and a clean, borderless
+    // section header (the tinted band is reserved for combo/list selection).
+    ImGui::Dummy(ImVec2(0.0f, ImGui::GetStyle().ItemSpacing.y));
+    scope.PushCol(ImGuiCol_Header, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
     scope.PushFont(IM_FONTSIZE_HEADING);
     return ImGui::TreeNodeEx(label, flags);
+}
+
+// A rounded, subtly elevated surface used for grouped content ("cards").
+bool ImBeginCard(const char* id)
+{
+    ImGui::PushStyleColor(ImGuiCol_ChildBg,
+                          MaterialYouTheme::ArgbToImVec4(MaterialYouTheme::FixedSurfaceColors::surfaceContainerLow));
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 14.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16.0f, 14.0f));
+    return ImGui::BeginChild(id, ImVec2(0, 0), ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysUseWindowPadding);
+}
+
+void ImEndCard()
+{
+    ImGui::EndChild();
+    ImGui::PopStyleVar(2);
+    ImGui::PopStyleColor();
 }
 
 constexpr ImGuiWindowFlags kImWindowFlagsTopMost =
@@ -1622,7 +1643,8 @@ void DrawDeviceControlsHeader()
         }
         ImGui::EndMenuBar();
     }
-    // Stats
+    // Stats (elevated status card)
+    ImBeginCard("##StatusCard");
     if (ImGui::BeginTable("##Stats", 2, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_Resizable))
     {
         ImGui::TableNextRow();
@@ -1679,6 +1701,7 @@ void DrawDeviceControlsHeader()
         }
         ImGui::EndTable();
     }
+    ImEndCard();
 }
 
 void DrawDeviceControlsPlayback()
@@ -2927,9 +2950,26 @@ bool clientInit(float displayScale, const char* fontPath)
     auto& style = ImGui::GetStyle();
     style.ScaleAllSizes(displayScale);
     style.FontScaleDpi = displayScale;
-    style.FrameRounding = 8.0f;
+
+    // Premium-neutral restyle: consistent rounding, an 8/4-based spacing scale,
+    // generous padding and a single accent (see MaterialYouTheme::Apply).
+    style.WindowPadding = ImVec2(20.0f, 20.0f);
+    style.WindowRounding = 16.0f;
+    style.ChildRounding = 12.0f;
+    style.PopupRounding = 14.0f;
+    style.FrameRounding = 10.0f;
+    style.GrabRounding = 10.0f;
+    style.TabRounding = 10.0f;
+    style.ScrollbarRounding = 8.0f;
+    style.ItemSpacing = ImVec2(12.0f, 8.0f);
+    style.ItemInnerSpacing = ImVec2(8.0f, 6.0f);
+    style.CellPadding = ImVec2(10.0f, 6.0f);
+    style.IndentSpacing = 22.0f;
+    style.ScrollbarSize = 12.0f;
+    style.FramePadding = ImVec2(12.0f, 8.0f);
+    style.SeparatorTextBorderSize = 0.0f;
+    style.SeparatorTextPadding = ImVec2(12.0f, 6.0f);
     style.CircleTessellationMaxError = 0.01f;
-    style.FramePadding = ImVec2(8.0f, 8.0f);
 #ifdef SDL_PLATFORM_IOS
     // Larger touch targets and rounded corners for iOS.
     style.FramePadding = ImVec2(14.0f, 14.0f);

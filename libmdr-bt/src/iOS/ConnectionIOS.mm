@@ -17,6 +17,17 @@ static NSString* const kProtocolV2 = @"jp.co.sony.songpal.mdr.link2";
 constexpr size_t kMaxWriteSize = 2048;
 constexpr size_t kReadChunkSize = 1024;
 
+// iOS tears down and re-creates the iAP2 (External Accessory) session on its own,
+// especially while the headset is also connected elsewhere (multipoint) or while the
+// Classic RFCOMM link re-pairs. Treat those drops as transient: transparently re-open
+// the EASession with exponential backoff instead of surfacing a fatal error. Only give
+// up (and report a clean disconnect) once the bounded retry budget is exhausted.
+constexpr double kReconnectBaseDelaySeconds = 0.5;
+constexpr double kReconnectMaxDelaySeconds = 5.0;
+constexpr int kReconnectMaxAttempts = 8;
+constexpr uint64_t kReconnectMaxShift = 4;
+constexpr double kOpenTimeoutSeconds = 8.0;
+
 static NSString* ProtocolForServiceUUID(const char* uuid)
 {
     if (strcasecmp(uuid, MDR_SERVICE_UUID_V2) == 0)
@@ -92,6 +103,18 @@ struct MDRIOSState
     uint64_t _generation;
     EASession* _session;
     int _openStreams;
+    // Auto-reconnect bookkeeping. All of these are touched only on the main
+    // queue/run loop (stream delegate callbacks, notification blocks and
+    // dispatch_after blocks), so they need no locking.
+    NSString* _address;
+    NSString* _protocol;
+    uint64_t _attempt;
+    bool _reconnecting;
+    bool _reconnectPending;
+    uint64_t _reconnectToken;
+    uint64_t _openToken;
+    id<NSObject> _connectObserver;
+    id<NSObject> _disconnectObserver;
 }
 
 - (instancetype)initWithState:(std::shared_ptr<MDRIOSState>)state generation:(uint64_t)generation
@@ -101,13 +124,42 @@ struct MDRIOSState
     {
         _state = std::move(state);
         _generation = generation;
+        NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
+        __weak MDRAccessorySession* weakSelf = self;
+        _connectObserver = [center addObserverForName:EAAccessoryDidConnectNotification
+                                               object:nil
+                                                queue:[NSOperationQueue mainQueue]
+                                           usingBlock:^(NSNotification* note) {
+                                             [weakSelf accessoryDidConnectNotification:note];
+                                           }];
+        _disconnectObserver = [center addObserverForName:EAAccessoryDidDisconnectNotification
+                                                  object:nil
+                                                   queue:[NSOperationQueue mainQueue]
+                                              usingBlock:^(NSNotification* note) {
+                                                [weakSelf accessoryDidDisconnectNotification:note];
+                                              }];
     }
     return self;
+}
+
+- (void)dealloc
+{
+    NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
+    if (_connectObserver)
+        [center removeObserver:_connectObserver];
+    if (_disconnectObserver)
+        [center removeObserver:_disconnectObserver];
+    _connectObserver = nil;
+    _disconnectObserver = nil;
+    [self close];
 }
 
 - (void)fail:(NSString*)message
 {
     [self close];
+    _reconnecting = false;
+    _reconnectPending = false;
+    ++_reconnectToken; // Invalidate any outstanding backoff timer.
     std::scoped_lock lock(_state->mutex);
     if (_state->generation != _generation)
         return;
@@ -116,8 +168,64 @@ struct MDRIOSState
     _state->condition.notify_all();
 }
 
+// Tear down the current session and schedule a re-open with exponential backoff.
+// While reconnecting the connection is surfaced as INPROGRESS (not an error), so the
+// upper layer keeps polling instead of treating the drop as fatal. In-flight tx is
+// preserved so a command interrupted mid-write is re-sent on the re-created session.
+- (void)scheduleReconnect
+{
+    [self close];
+    {
+        std::scoped_lock lock(_state->mutex);
+        if (_state->generation != _generation)
+            return;
+        if (_state->result == MDR_RESULT_OK)
+        {
+            _state->result = MDR_RESULT_INPROGRESS;
+            _state->rx.clear();
+            _state->condition.notify_all();
+        }
+        _state->error = "Connection interrupted; reconnecting";
+    }
+    if (_reconnectPending)
+        return;
+    if (!_reconnecting)
+    {
+        _reconnecting = true;
+        _attempt = 0;
+    }
+    if (_attempt >= kReconnectMaxAttempts)
+    {
+        [self fail:@"Connection lost: reconnect attempts exhausted"];
+        return;
+    }
+    _reconnectPending = true;
+    const unsigned shift = static_cast<unsigned>(std::min<uint64_t>(_attempt, kReconnectMaxShift));
+    double delay = kReconnectBaseDelaySeconds * (1u << shift);
+    if (delay > kReconnectMaxDelaySeconds)
+        delay = kReconnectMaxDelaySeconds;
+    ++_attempt;
+    const uint64_t generation = _generation;
+    const uint64_t token = ++_reconnectToken;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+      {
+          std::scoped_lock lock(_state->mutex);
+          if (_state->generation != generation)
+              return;
+      }
+      if (token != _reconnectToken)
+          return; // Superseded by an accessory-reconnect fast-forward.
+      _reconnectPending = false;
+      [self openAddress:_address protocol:_protocol];
+    });
+}
+
 - (void)openAddress:(NSString*)address protocol:(NSString*)protocol
 {
+    [self close];
+    _address = [address copy];
+    _protocol = [protocol copy];
+    _openStreams = 0;
     EAAccessory* target = nil;
     for (EAAccessory* accessory in [EAAccessoryManager sharedAccessoryManager].connectedAccessories)
     {
@@ -131,7 +239,9 @@ struct MDRIOSState
     }
     if (!target)
     {
-        [self fail:@"Device not found (not connected?)"];
+        // Not currently connected: retry with backoff instead of failing hard. This is
+        // normal right after a multipoint/RFCOMM re-pair.
+        [self scheduleReconnect];
         return;
     }
     if (![target.protocolStrings containsObject:protocol])
@@ -142,16 +252,32 @@ struct MDRIOSState
     _session = [[EASession alloc] initWithAccessory:target forProtocol:protocol];
     if (!_session)
     {
-        [self fail:@"Unable to open session (in use by another app?)"];
+        // The accessory can refuse a new session briefly while re-establishing; retry.
+        [self scheduleReconnect];
         return;
     }
     target.delegate = self;
     for (NSStream* stream in @[ _session.inputStream, _session.outputStream ])
     {
         stream.delegate = self;
-        [stream scheduleInRunLoop:[NSRunLoop mainRunLoop] forMode:NSDefaultRunLoopMode];
+        [stream scheduleInRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
         [stream open];
     }
+    // Watchdog: if the streams never finish opening (a silent failure delivers no
+    // error/end event), tear down and retry rather than stalling forever.
+    const uint64_t generation = _generation;
+    const uint64_t token = ++_openToken;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kOpenTimeoutSeconds * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+                     {
+                         std::scoped_lock lock(_state->mutex);
+                         if (_state->generation != generation || _state->result == MDR_RESULT_OK)
+                             return;
+                     }
+                     if (token != _openToken)
+                         return;
+                     [self scheduleReconnect];
+                   });
 }
 
 - (void)close
@@ -164,7 +290,7 @@ struct MDRIOSState
     {
         stream.delegate = nil;
         [stream close];
-        [stream removeFromRunLoop:[NSRunLoop mainRunLoop] forMode:NSDefaultRunLoopMode];
+        [stream removeFromRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
     }
     _session = nil;
     _openStreams = 0;
@@ -179,7 +305,7 @@ struct MDRIOSState
         const NSInteger count = [input read:buffer maxLength:sizeof(buffer)];
         if (count < 0)
         {
-            [self fail:input.streamError.localizedDescription ?: @"Read failed"];
+            [self scheduleReconnect];
             return;
         }
         if (count == 0)
@@ -219,7 +345,7 @@ struct MDRIOSState
             _state->condition.notify_all();
     }
     if (error)
-        [self fail:error];
+        [self scheduleReconnect];
 }
 
 - (void)stream:(NSStream*)stream handleEvent:(NSStreamEvent)event
@@ -233,6 +359,9 @@ struct MDRIOSState
         _openStreams |= stream == _session.inputStream ? 1 : 2;
         if (_openStreams != 3)
             break;
+        _reconnecting = false;
+        _reconnectPending = false;
+        _attempt = 0;
         std::scoped_lock lock(_state->mutex);
         if (_state->generation == _generation && _state->result == MDR_RESULT_INPROGRESS)
         {
@@ -248,10 +377,10 @@ struct MDRIOSState
         [self flush];
         break;
     case NSStreamEventErrorOccurred:
-        [self fail:stream.streamError.localizedDescription ?: @"Stream error"];
-        break;
     case NSStreamEventEndEncountered:
-        [self fail:@"Connection closed by remote"];
+        // A dropped stream is transient (multipoint switch, RFCOMM re-pair, brief
+        // radio loss); re-establish the session instead of failing.
+        [self scheduleReconnect];
         break;
     default:
         break;
@@ -260,7 +389,40 @@ struct MDRIOSState
 
 - (void)accessoryDidDisconnect:(EAAccessory*)accessory
 {
-    [self fail:@"Device disconnected"];
+    [self scheduleReconnect];
+}
+
+- (void)accessoryDidConnectNotification:(NSNotification*)note
+{
+    if (!_reconnecting || !_reconnectPending || !_address)
+        return;
+    EAAccessory* accessory = note.userInfo[EAAccessoryKey];
+    if (!accessory)
+        return;
+    char candidate[18];
+    FormatAccessoryAddress(accessory, candidate);
+    if (strcasecmp(candidate, _address.UTF8String) != 0)
+        return;
+    // The accessory reappeared: fast-forward the backoff and re-open immediately.
+    _attempt = 0;
+    ++_reconnectToken; // Cancel the outstanding backoff timer.
+    _reconnectPending = false;
+    [self openAddress:_address protocol:_protocol];
+}
+
+- (void)accessoryDidDisconnectNotification:(NSNotification*)note
+{
+    if (!_address)
+        return;
+    EAAccessory* accessory = note.userInfo[EAAccessoryKey];
+    if (!accessory)
+        return;
+    char candidate[18];
+    FormatAccessoryAddress(accessory, candidate);
+    if (strcasecmp(candidate, _address.UTF8String) != 0)
+        return;
+    if (_session)
+        [self scheduleReconnect];
 }
 
 @end
